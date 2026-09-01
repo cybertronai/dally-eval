@@ -1,0 +1,32 @@
+[package]
+name = "dally-eval"
+version = "0.1.0"
+edition = "2021"
+description = "High-throughput evaluator for Bill Dally 2D Manhattan communication-cost IR programs"
+license = "MIT"
+
+[lib]
+name = "dally_eval"
+path = "src/lib.rs"
+
+[[bin]]
+name = "dally-eval"
+path = "src/main.rs"
+
+[dependencies]
+rayon = "1.10"
+wgpu = "24"
+pollster = "0.4"
+bytemuck = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "throughput"
+harness = false
+
+[profile.release]
+debug = false
+lto = "thin"
+codegen-units = 1
