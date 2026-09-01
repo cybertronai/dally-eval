@@ -2,17 +2,11 @@
 //!
 //! Search dimensions beyond raw layout permutation (which cannot beat
 //! optimize_layout's frequency sort - it IS the optimum for a single
-//! mapping):
-//!   1. walk ORDER within weight classes: which knob combinations get
-//!      visited first inside each weight class (lexicographic today)
-//!   2. cap choice per band: intermediate caps (e.g. 4/5 for the 60%
-//!      band) that the hand submissions skipped
-//!   3. information-set SEED for the sis family: which 18 columns form
-//!      the static pivot set
-//! Each candidate is scored by static cost (exact, instant) and
-//! recovery on a 256-instance probe batch via dally-eval's CPU engine;
-//! finalists get a full 1,024-instance dev verification and fresh-draw
-//! confirmation.
+//! mapping): walk order within weight classes, cap choice per band,
+//! and the information-set seed for the sis family. Each candidate is
+//! scored by static cost (exact, instant) and recovery on a
+//! 256-instance probe batch via dally-eval's CPU engine; finalists get
+//! a full 1,024-instance dev verification and fresh-draw confirmation.
 
 use std::time::Instant;
 
