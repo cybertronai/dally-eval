@@ -37,6 +37,9 @@ two's-complement byte.
   CubeCL `#[cube]` kernel written in pure Rust (no shader text), one
   workgroup lane per instance, div-by-zero as a per-instance trap
   flag, with the op stream and address tables resident across batches
+- `src/lds_runner.rs` - `LdsRunner`: cells in workgroup shared memory
+  (LDS) with adapter-limit-parameterized tiling; falls back to
+  `CubeRunner` for programs whose cells exceed the LDS budget
 - `tests/` - golden parity (real 73,293-op benchmark program, 32 real
   instances, byte-exact expected outputs), task families (4x4 matmul,
   5-input polynomial, 16/32-bit sparse parity trees), GPU-vs-CPU parity
@@ -103,16 +106,32 @@ bit-exact vs CPU on every batch):
 
 Scored mode (grading on device, one flag word per instance instead of
 the full output matrix) measures within noise of raw mode at every
-batch size - readback is *not* the bottleneck. The kernel is
-global-memory-latency bound: every IR instruction does dependent,
-dynamically-addressed cell reads from device memory, and a 73k-deep
-dependent load chain per instance limits per-thread progress. The
-known next lever is keeping hot cells in faster memory (shared memory
-at reduced workgroup width, or register-resident hot cells), which is
-a kernel redesign; the 16-thread CPU runner (208k inst/s) remains
-ahead at these batch sizes. The kernel itself is portable Rust - the
-same source targets WGSL, SPIR-V, MSL, and CUDA via CubeCL's runtime
-compilation.
+batch size - readback is *not* the bottleneck for the global-memory
+kernel.
+
+LDS kernel (`LdsRunner`): per-instance cells live in workgroup shared
+memory (tiling parameterized from adapter limits: lanes =
+prev_pow2(max_shared_memory_bytes / instance_cell_bytes); on this
+adapter 32 lanes x 451 words = 57.7KB of the 64KB budget). All
+dependent cell reads/writes execute at LDS latency instead of global
+memory latency:
+
+| batch | global kernel | LDS kernel | |
+| - | - | - | - |
+| 1,000 | 33.4k inst/s | 68.4k inst/s | 2.1x |
+| 10,000 | 84.2k | 160.4k | 1.9x |
+| 50,000 | 64.2k | 157.6k | 2.5x |
+| 100,000 | 63.0k | 162.5k | 2.6x |
+
+An occupancy sweep (lanes 32/16/8/4, forcing 1-8 workgroups per CU)
+measures flat within noise: the LDS kernel is not occupancy-bound but
+per-op dispatch-bound (the 17-way opcode else-if chain costs ~400+
+cycles/op on this backend regardless of resident waves). The next
+throughput lever is dispatch restructuring (op-stream pre-bucketing by
+kind or jump-table dispatch), not tiling. The 16-thread CPU runner
+(208k inst/s) still leads at these batch sizes. All kernels are
+portable Rust - one source targeting WGSL, SPIR-V, MSL, and CUDA via
+CubeCL's runtime compilation.
 
 ## Parallelism shape
 

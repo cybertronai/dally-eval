@@ -25,9 +25,11 @@ pub mod cost;
 pub mod cube_runner;
 pub mod eval;
 pub mod ir;
+pub mod lds_runner;
 pub mod runner;
 
 pub use cube_runner::CubeRunner;
 pub use eval::{Checker, Machine, RunError};
 pub use ir::{Op, OpKind, Program};
+pub use lds_runner::{LdsRunner, Tiling};
 pub use runner::{BatchRunner, CpuRunner};

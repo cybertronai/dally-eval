@@ -9,7 +9,7 @@ use std::time::Instant;
 
 use dally_eval::ir::Program;
 use dally_eval::runner::BatchRunner;
-use dally_eval::{CubeRunner, RunError};
+use dally_eval::{CubeRunner, LdsRunner, RunError};
 
 fn main() {
     let text = fs::read_to_string(
@@ -87,5 +87,75 @@ fn main() {
             "scored {n:>6}: {per:>10.3?}/batch   {:>10.0} instances/s",
             n as f64 / per.as_secs_f64()
         );
+
+        // LDS kernel: cells in workgroup shared memory
+        let lds_runner = match LdsRunner::new(&prog, 100_000) {
+            Ok(r) => {
+                eprintln!(
+                    "lds tiling: lanes={} cell_words={} lds_bytes={}",
+                    r.tiling().lanes,
+                    r.tiling().cell_words,
+                    r.tiling().lds_bytes
+                );
+                r
+            }
+            Err(RunError::GpuUnavailable(m)) => {
+                eprintln!("SKIP lds: {m}");
+                return;
+            }
+            Err(e) => panic!("{e:?}"),
+        };
+        let gpu2 = lds_runner.run(&prog, &inputs, n).expect("lds run");
+        for (i, (g, c)) in gpu2.iter().zip(cpu.iter()).enumerate() {
+            assert_eq!(g, c, "LDS divergence at instance {i}");
+        }
+        let t0 = Instant::now();
+        for _ in 0..iters {
+            let _ = lds_runner.run(&prog, &inputs, n).unwrap();
+        }
+        let per = t0.elapsed() / iters;
+        println!(
+            "lds    {n:>6}: {per:>10.3?}/batch   {:>10.0} instances/s",
+            n as f64 / per.as_secs_f64()
+        );
+
+        // LDS scored mode (grading on device)
+        let t0 = Instant::now();
+        for _ in 0..iters {
+            let _ = lds_runner
+                .run_scored(&prog, &inputs, &expected_flat, n)
+                .unwrap();
+        }
+        let per = t0.elapsed() / iters;
+        println!(
+            "lds+sc {n:>6}: {per:>10.3?}/batch   {:>10.0} instances/s",
+            n as f64 / per.as_secs_f64()
+        );
+
+        // occupancy sweep: smaller tilings -> more workgroups per CU
+        for &cap in &[32_768usize, 16_384, 8_192] {
+            let r = match LdsRunner::with_lds_cap(&prog, 100_000, cap) {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("skip cap {cap}: {e:?}");
+                    continue;
+                }
+            };
+            let out = r.run(&prog, &inputs, n).expect("lds run");
+            for (i, (g, c)) in out.iter().zip(cpu.iter()).enumerate() {
+                assert_eq!(g, c, "LDS(cap={cap}) divergence at {i}");
+            }
+            let it = 3.max(iters / 2);
+            let t0 = Instant::now();
+            for _ in 0..it {
+                let _ = r.run(&prog, &inputs, n).unwrap();
+            }
+            let per = t0.elapsed() / it;
+            println!(
+                "lds@{cap:<6} (lanes={}): {per:>10.3?}/batch  {:>8.0} inst/s",
+                r.tiling().lanes,
+                n as f64 / per.as_secs_f64()
+            );
+        }
     }
 }
