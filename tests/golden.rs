@@ -18,7 +18,7 @@ fn fixture(name: &str) -> std::path::PathBuf {
 
 fn parse_fixture(bin: &[u8]) -> (usize, usize, u64, Vec<u8>, Vec<u8>) {
     let mut off = 0usize;
-    let mut u32at = |off: &mut usize| {
+    let u32at = |off: &mut usize| {
         let v = u32::from_le_bytes(bin[*off..*off + 4].try_into().unwrap());
         *off += 4;
         v as usize
