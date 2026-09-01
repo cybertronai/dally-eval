@@ -56,7 +56,7 @@ fn cmd_run(args: &[String]) {
     let correct = outs
         .iter()
         .zip(expected.chunks(out_w))
-        .filter(|(got, want)| got == &want)
+        .filter(|(got, want)| got == want)
         .count();
     println!(
         "instances {n}  width {width}  static_cost {}  correct {}/{} ({:.2}%)  {:?}",
