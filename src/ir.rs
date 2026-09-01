@@ -136,9 +136,11 @@ impl Program {
         let last = body
             .pop()
             .ok_or("program has ops but no output declaration")?;
-        let mut p = Program::default();
-        p.inputs = parse_addr_list(first)?;
-        p.outputs = parse_addr_list(last)?;
+        let mut p = Program {
+            inputs: parse_addr_list(first)?,
+            outputs: parse_addr_list(last)?,
+            ..Default::default()
+        };
         if p.inputs.is_empty() {
             return Err("no input addresses declared".into());
         }
@@ -250,7 +252,6 @@ fn parse_op(line: &str) -> Result<Op, String> {
         }
         Ok(v)
     };
-    use OpKind::*;
     match kind {
         Copy | Not | Abs => {
             if rest_ops.len() != 1 {

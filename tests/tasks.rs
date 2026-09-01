@@ -6,10 +6,11 @@ use dally_eval::eval::Machine;
 use dally_eval::ir::{Op, OpKind, Program};
 
 fn builder(n_inputs: u16) -> ProgramBuilder {
-    let mut b = ProgramBuilder::default();
     // inputs occupy cells 1..=n_inputs; scratch allocates above them
-    b.next = n_inputs;
-    b
+    ProgramBuilder {
+        next: n_inputs,
+        ..Default::default()
+    }
 }
 
 #[derive(Default)]
