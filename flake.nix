@@ -22,6 +22,7 @@
             toolchain
             pkgs.vulkan-loader
             pkgs.vulkan-tools
+            (pkgs.python3.withPackages (ps: [ ps.numpy ]))
           ];
           RUST_SRC_PATH = "${toolchain}/lib/rustlib/src/rust/library";
           # headless GPU access: RADV ICD + loader + libudev

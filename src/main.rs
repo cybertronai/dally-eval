@@ -21,11 +21,30 @@ fn main() {
         Some("cost") => cmd_cost(&args[2..]),
         Some("run") => cmd_run(&args[2..]),
         Some("bench") => cmd_bench(&args[2..]),
+        Some("verify") => cmd_verify(&args[2..]),
         _ => {
-            eprintln!("usage: dally-eval <cost|run|bench> ...");
+            eprintln!(
+                "usage: dally-eval <cost|run|bench|verify> ...\n  verify: IR on stdin -> JSON {{cost, ops, inputs, outputs}}"
+            );
             std::process::exit(2);
         }
     }
+}
+
+/// Machine-friendly mode for embedding from Python: reads the IR text
+/// on stdin, writes one JSON object with the static scoring facts.
+fn cmd_verify(_args: &[String]) {
+    use std::io::Read;
+    let mut text = String::new();
+    std::io::stdin().read_to_string(&mut text).unwrap_or_else(|e| die(e));
+    let prog = Program::parse(&text).unwrap_or_else(|e| die(e));
+    println!(
+        "{{\"cost\":{},\"ops\":{},\"inputs\":{},\"outputs\":{}}}",
+        prog.static_cost,
+        prog.len(),
+        prog.inputs.len(),
+        prog.outputs.len()
+    );
 }
 
 fn cmd_cost(args: &[String]) {
