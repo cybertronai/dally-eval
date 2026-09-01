@@ -148,6 +148,41 @@ program and 32 dev instances with the Python engine (see git history of
 this README for the exact snippet); costs asserted in `tests/golden.rs`
 must match the reference evaluator's output.
 
+## Inner-loop search acceleration (measured)
+
+`examples/search-sweep.rs` runs an automated candidate-layout search
+(200 address permutations of the real 73k-op benchmark program, each
+evaluated over 1,024 instances):
+
+- Rust CPU (Rayon): 155 candidates/s end-to-end; the same sweep in the
+  Python engine would take ~9.3 minutes (~460x slower).
+- GPU LDS engine: 70 candidates/s at this batch size (dispatch-bound
+  kernel; see the LDS section). At small batches the CPU engine is the
+  right scorer; the GPU path exists for scale.
+
+Sub-millisecond per-candidate evaluation is what makes autonomous
+hardware search practical: a 10,000-candidate sweep finishes in ~65
+seconds instead of ~8 hours.
+
+## Systolic GEMM in the Dally IR (examples/systolic-gemm.rs)
+
+The 2D systolic mesh's data-movement principle - stage each operand
+once into a cell near its consumers, then re-read it at near-zero
+distance - expressed as a straight-line Dally IR schedule, verified
+bit-exact against a reference GEMM:
+
+| size | input placement | naive cost | systolic cost | saved |
+| - | - | - | - | - |
+| 4x4 | addr 1+ (cheapest cells) | 2,072 | 2,846 | -37% (staging loses when inputs are already near) |
+| 4x4 | addr 2001+ | 7,634 | 3,684 | 51.7% |
+| 8x8 | addr 5001+ | 104,104 | 46,147 | 55.7% |
+| 16x16 | addr 20001+ | 2,023,849 | 783,912 | 61.3% |
+
+The negative control matters: when operands already live at the
+cheapest addresses there is nothing to stage and the copies only add
+cost. The win grows with operand distance and reuse count, which is
+exactly the trade the matmul competition asks schedules to navigate.
+
 ## For AI agents working in this repo
 
 Cold start: read this README, then `src/ir.rs` (the semantics contract
