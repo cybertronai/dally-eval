@@ -4,6 +4,12 @@ version = "0.1.0"
 edition = "2021"
 description = "High-throughput evaluator for Bill Dally 2D Manhattan communication-cost IR programs"
 license = "MIT"
+repository = "https://github.com/cybertronai/dally-eval"
+homepage = "https://github.com/cybertronai/dally-eval"
+documentation = "https://github.com/cybertronai/dally-eval#readme"
+readme = "README.md"
+keywords = ["interpreter", "benchmark", "wgpu", "rayon", "ir"]
+categories = ["science", "command-line-utilities"]
 
 [lib]
 name = "dally_eval"
@@ -24,6 +30,10 @@ criterion = "0.5"
 
 [[bench]]
 name = "throughput"
+harness = false
+
+[[bench]]
+name = "gpu-throughput"
 harness = false
 
 [profile.release]

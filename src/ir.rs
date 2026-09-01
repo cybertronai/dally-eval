@@ -199,7 +199,14 @@ fn parse_op(line: &str) -> Result<Op, String> {
             "ge" => CmpGe,
             _ => return Err(format!("bad predicate {pred:?}")),
         };
-        return Ok(Op { kind, dst, a, b, c: 1, imm: 0 });
+        return Ok(Op {
+            kind,
+            dst,
+            a,
+            b,
+            c: 1,
+            imm: 0,
+        });
     }
     let kind = match head {
         "set" => Set,
@@ -226,7 +233,14 @@ fn parse_op(line: &str) -> Result<Op, String> {
         if !(-128..=255).contains(&v) {
             return Err(format!("immediate {v} out of 8-bit range"));
         }
-        return Ok(Op { kind, dst, a: 1, b: 1, c: 1, imm: (v & 0xFF) as u8 });
+        return Ok(Op {
+            kind,
+            dst,
+            a: 1,
+            b: 1,
+            c: 1,
+            imm: (v & 0xFF) as u8,
+        });
     }
     let rest_ops: Vec<&str> = parts.map(|s| s.trim()).collect();
     let addr = |t: &str, what: &str| -> Result<u16, String> {
@@ -243,7 +257,14 @@ fn parse_op(line: &str) -> Result<Op, String> {
                 return Err(format!("{head:?} needs exactly 1 operand in {line:?}"));
             }
             let a = addr(rest_ops[0], "src1")?;
-            Ok(Op { kind, dst, a, b: 1, c: 1, imm: 0 })
+            Ok(Op {
+                kind,
+                dst,
+                a,
+                b: 1,
+                c: 1,
+                imm: 0,
+            })
         }
         Select => {
             if rest_ops.len() != 3 {
@@ -252,7 +273,14 @@ fn parse_op(line: &str) -> Result<Op, String> {
             let a = addr(rest_ops[0], "cond")?;
             let b = addr(rest_ops[1], "true-src")?;
             let c = addr(rest_ops[2], "false-src")?;
-            Ok(Op { kind, dst, a, b, c, imm: 0 })
+            Ok(Op {
+                kind,
+                dst,
+                a,
+                b,
+                c,
+                imm: 0,
+            })
         }
         // Binary ops accept 3 operands (dst, s1, s2) or the 2-operand
         // accumulator form (dst, s2) whose first source is dst itself,
@@ -261,12 +289,26 @@ fn parse_op(line: &str) -> Result<Op, String> {
         _ => match rest_ops.len() {
             1 => {
                 let b = addr(rest_ops[0], "src2")?;
-                Ok(Op { kind, dst, a: dst, b, c: 1, imm: 0 })
+                Ok(Op {
+                    kind,
+                    dst,
+                    a: dst,
+                    b,
+                    c: 1,
+                    imm: 0,
+                })
             }
             2 => {
                 let a = addr(rest_ops[0], "src1")?;
                 let b = addr(rest_ops[1], "src2")?;
-                Ok(Op { kind, dst, a, b, c: 1, imm: 0 })
+                Ok(Op {
+                    kind,
+                    dst,
+                    a,
+                    b,
+                    c: 1,
+                    imm: 0,
+                })
             }
             n => Err(format!("{head:?} needs 2 or 3 operands, got {n}")),
         },

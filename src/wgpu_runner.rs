@@ -260,16 +260,12 @@ async fn run_on_gpu(
     });
     let in_addrs_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: None,
-        contents: bytemuck::cast_slice(
-            &prog.inputs.iter().map(|&x| x as u32).collect::<Vec<_>>(),
-        ),
+        contents: bytemuck::cast_slice(&prog.inputs.iter().map(|&x| x as u32).collect::<Vec<_>>()),
         usage: storage,
     });
     let out_addrs_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: None,
-        contents: bytemuck::cast_slice(
-            &prog.outputs.iter().map(|&x| x as u32).collect::<Vec<_>>(),
-        ),
+        contents: bytemuck::cast_slice(&prog.outputs.iter().map(|&x| x as u32).collect::<Vec<_>>()),
         usage: storage,
     });
     let inputs_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -303,19 +299,43 @@ async fn run_on_gpu(
         label: None,
         layout: &layout,
         entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: ops_buf.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 1, resource: in_addrs_buf.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 2, resource: out_addrs_buf.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 3, resource: inputs_buf.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 4, resource: cells_buf.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 5, resource: outputs_buf.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 6, resource: traps_buf.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 7, resource: params_buf.as_entire_binding() },
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: ops_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: in_addrs_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: out_addrs_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: inputs_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: cells_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 5,
+                resource: outputs_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 6,
+                resource: traps_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 7,
+                resource: params_buf.as_entire_binding(),
+            },
         ],
     });
 
-    let mut encoder = device
-        .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+    let mut encoder =
+        device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
     {
         let mut pass = encoder.begin_compute_pass(&Default::default());
         pass.set_pipeline(&pipeline);
@@ -339,11 +359,9 @@ async fn run_on_gpu(
     queue.submit(Some(encoder.finish()));
 
     let (out_snd, out_rcv) = std::sync::mpsc::channel();
-    out_read
-        .slice(..)
-        .map_async(wgpu::MapMode::Read, move |r| {
-            let _ = out_snd.send(r);
-        });
+    out_read.slice(..).map_async(wgpu::MapMode::Read, move |r| {
+        let _ = out_snd.send(r);
+    });
     let _ = device.poll(wgpu::Maintain::Wait);
     let (t_snd, t_rcv) = std::sync::mpsc::channel();
     traps_read
@@ -361,7 +379,12 @@ async fn run_on_gpu(
     for (i, trap) in traps.iter().enumerate() {
         if *trap != 0 {
             // op index is not tracked on the GPU side
-            return Err((i, RunError::DivideByZero { op_index: usize::MAX }));
+            return Err((
+                i,
+                RunError::DivideByZero {
+                    op_index: usize::MAX,
+                },
+            ));
         }
         rows.push(flat[i * prog.outputs.len()..(i + 1) * prog.outputs.len()].to_vec());
     }

@@ -54,15 +54,18 @@ The devShell pins Rust via oxalica/rust-overlay from
 `rust-toolchain.toml` (1.85.0) and wires headless GPU access (RADV
 ICD, Vulkan loader, libudev).
 
-macOS / non-Nix Linux:
+macOS (Apple Silicon: wgpu uses the Metal backend out of the box):
 ```
 rustup toolchain install 1.85.0
 rustup default 1.85.0   # or trust rust-toolchain.toml
 cargo test
 cargo bench
 ```
-GPU tests need a Vulkan driver; they soft-skip when no adapter is
-found. On NixOS hosts, run GPU work under the workspace policy slice:
+GPU tests pick up Metal automatically and soft-skip only if no adapter
+is found.
+
+Non-Nix Linux: same rustup path; the GPU backend needs a Vulkan driver
+(RADV/AMD, ANV/Intel, or NVIDIA proprietary). On NixOS hosts, run GPU work under the workspace policy slice:
 ```
 systemd-run --user --slice=training.slice --wait --pipe \
   bash -c 'cd dally-eval && nix develop --command cargo test --test wgpu_parity'
@@ -88,8 +91,24 @@ Python reference: ~2.8 s per 1,024 instances of the 73k-op program.
 | eval 1,024 instances, Rayon | 4.9 ms (~208k inst/s) |
 
 That is ~570x the Python engine on the same workload shape, with
-byte-identical outputs. The GPU backend matches the CPU runner
-bit-exactly on the golden fixture (AMD RX 6900 XT, RADV).
+byte-identical outputs.
+
+GPU (WgpuRunner, end-to-end per call: upload + kernel + readback;
+AMD RX 6900 XT / RADV, same 73,293-op program, bit-exact vs CPU on
+every batch):
+
+| batch | per batch | instances/s |
+| - | - | - |
+| 1,000 | 46.1 ms | 21,691 |
+| 10,000 | 130.0 ms | 76,919 |
+| 50,000 | 810.1 ms | 61,719 |
+
+Honest reading: the current GPU path rebuilds its pipeline and buffers
+on every call, so at these batch sizes the 16-thread CPU runner wins
+(208k inst/s). The GPU backend's value today is correctness (bit-exact
+semantics on a second vendor stack) and its headroom: caching the
+pipeline/buffers per program and raising batch sizes past ~100k
+instances is the known path to making it the throughput leader.
 
 ## Parallelism shape
 
@@ -105,3 +124,23 @@ From `sutro-problems/sparse-parity`, export the current 20/40% record
 program and 32 dev instances with the Python engine (see git history of
 this README for the exact snippet); costs asserted in `tests/golden.rs`
 must match the reference evaluator's output.
+
+## For AI agents working in this repo
+
+Cold start: read this README, then `src/ir.rs` (the semantics contract
+lives in `parse_op` and `Op::read_cost`), then `tests/golden.rs` (the
+Python-parity contract). The golden fixtures are generated from
+cybertronai/sutro-problems (sparse-parity tier, exported 2026-09-01);
+`tests/golden.rs` pins their exact cost and outputs - any semantics
+change that breaks them is wrong unless the reference evaluator changed
+first. GPU work on the NixOS host runs under `training.slice` per the
+workspace GPU-compute policy; the command is in the wgpu_parity test
+header.
+
+## Fixture provenance
+
+`tests/fixtures/siswalk1_cap2.ir` is the sparse-parity benchmark's
+2026-08-30 20/40%-band record program (layout-optimized static-IS walk)
+and `tests/fixtures/parity32.bin` holds 32 deterministic dev-suite
+instances with expected outputs from the Python reference evaluator,
+both exported from cybertronai/sutro-problems on 2026-09-01.

@@ -49,7 +49,14 @@ fn matmul_4x4_matches_reference() {
     for i in 0..4usize {
         for j in 0..4usize {
             let acc = b.alloc();
-            b.push(Op { kind: K::Set, dst: acc, a: 1, b: 1, c: 1, imm: 0 });
+            b.push(Op {
+                kind: K::Set,
+                dst: acc,
+                a: 1,
+                b: 1,
+                c: 1,
+                imm: 0,
+            });
             for k in 0..4usize {
                 let prod = b.alloc();
                 b.push(Op {
@@ -57,8 +64,17 @@ fn matmul_4x4_matches_reference() {
                     dst: prod,
                     a: a_base + (i * 4 + k) as u16,
                     b: b_base + (k * 4 + j) as u16,
-                    c: 1, imm: 0 });
-                b.push(Op { kind: K::Add, dst: acc, a: acc, b: prod, c: 1, imm: 0 });
+                    c: 1,
+                    imm: 0,
+                });
+                b.push(Op {
+                    kind: K::Add,
+                    dst: acc,
+                    a: acc,
+                    b: prod,
+                    c: 1,
+                    imm: 0,
+                });
             }
             c_cells.push(acc);
         }
@@ -104,15 +120,43 @@ fn polynomial_5_term_matches_reference() {
     let x = 1u16;
     // acc = c4
     let mut acc = b.alloc();
-    b.push(Op { kind: K::Set, dst: acc, a: 1, b: 1, imm: coeffs[4], c: 1 });
+    b.push(Op {
+        kind: K::Set,
+        dst: acc,
+        a: 1,
+        b: 1,
+        imm: coeffs[4],
+        c: 1,
+    });
     for &c in coeffs.iter().rev().skip(1) {
         // acc = acc * x + c
         let prod = b.alloc();
-        b.push(Op { kind: K::Mul, dst: prod, a: acc, b: x, c: 1, imm: 0 });
+        b.push(Op {
+            kind: K::Mul,
+            dst: prod,
+            a: acc,
+            b: x,
+            c: 1,
+            imm: 0,
+        });
         let cst = b.alloc();
-        b.push(Op { kind: K::Set, dst: cst, a: 1, b: 1, imm: c, c: 1 });
+        b.push(Op {
+            kind: K::Set,
+            dst: cst,
+            a: 1,
+            b: 1,
+            imm: c,
+            c: 1,
+        });
         let sum = b.alloc();
-        b.push(Op { kind: K::Add, dst: sum, a: prod, b: cst, c: 1, imm: 0 });
+        b.push(Op {
+            kind: K::Add,
+            dst: sum,
+            a: prod,
+            b: cst,
+            c: 1,
+            imm: 0,
+        });
         acc = sum;
     }
     let prog = b.build(vec![x], vec![acc]);
@@ -136,7 +180,14 @@ fn parity_prog(n: usize, secret: &[usize]) -> Program {
     let mut acc = 1u16 + secret[0] as u16;
     for &s in &secret[1..] {
         let out = b.alloc();
-        b.push(Op { kind: K::Xor, dst: out, a: acc, b: 1 + s as u16, c: 1, imm: 0 });
+        b.push(Op {
+            kind: K::Xor,
+            dst: out,
+            a: acc,
+            b: 1 + s as u16,
+            c: 1,
+            imm: 0,
+        });
         acc = out;
     }
     let inputs: Vec<u16> = (1..=n as u16).collect();

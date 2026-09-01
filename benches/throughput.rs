@@ -13,8 +13,7 @@ use dally_eval::runner::{BatchRunner, CpuRunner};
 
 fn fixture_ir() -> String {
     fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/siswalk1_cap2.ir"),
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/siswalk1_cap2.ir"),
     )
     .unwrap()
 }

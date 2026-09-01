@@ -79,7 +79,9 @@ fn cmd_bench(args: &[String]) {
     let mut seed = 0x2545F4914F6CDD1Du64;
     let mut inputs = vec![0u8; reps * width];
     for b in inputs.iter_mut() {
-        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        seed = seed
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         *b = (seed >> 33) as u8;
     }
     let t0 = Instant::now();

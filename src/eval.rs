@@ -37,11 +37,7 @@ impl Machine {
 
     /// Run one instance: write `inputs` into the declared input cells,
     /// interpret every op, return the declared output bytes.
-    pub fn run(
-        &mut self,
-        prog: &Program,
-        inputs: &[u8],
-    ) -> Result<Vec<u8>, RunError> {
+    pub fn run(&mut self, prog: &Program, inputs: &[u8]) -> Result<Vec<u8>, RunError> {
         self.reset();
         debug_assert_eq!(inputs.len(), prog.inputs.len());
         for (&addr, &val) in prog.inputs.iter().zip(inputs) {
@@ -95,24 +91,13 @@ pub fn exec_op(op: &Op, i: usize, cells: &mut [u8]) -> Result<(), RunError> {
         Set => cells[op.dst as usize] = op.imm,
         Copy => cells[op.dst as usize] = rd(op.a)?,
         Not => cells[op.dst as usize] = !rd(op.a)?,
-        Abs => {
-            cells[op.dst as usize] = (rd(op.a)? as i8).wrapping_abs() as u8
-        }
+        Abs => cells[op.dst as usize] = (rd(op.a)? as i8).wrapping_abs() as u8,
         And => cells[op.dst as usize] = rd(op.a)? & rd(op.b)?,
         Or => cells[op.dst as usize] = rd(op.a)? | rd(op.b)?,
         Xor => cells[op.dst as usize] = rd(op.a)? ^ rd(op.b)?,
-        Add => {
-            cells[op.dst as usize] =
-                rd(op.a)?.wrapping_add(rd(op.b)?)
-        }
-        Sub => {
-            cells[op.dst as usize] =
-                rd(op.a)?.wrapping_sub(rd(op.b)?)
-        }
-        Mul => {
-            cells[op.dst as usize] =
-                rd(op.a)?.wrapping_mul(rd(op.b)?)
-        }
+        Add => cells[op.dst as usize] = rd(op.a)?.wrapping_add(rd(op.b)?),
+        Sub => cells[op.dst as usize] = rd(op.a)?.wrapping_sub(rd(op.b)?),
+        Mul => cells[op.dst as usize] = rd(op.a)?.wrapping_mul(rd(op.b)?),
         Div => {
             let x = rd(op.a)? as i8;
             let y = rd(op.b)? as i8;
@@ -122,33 +107,19 @@ pub fn exec_op(op: &Op, i: usize, cells: &mut [u8]) -> Result<(), RunError> {
             // Python `//` is floor division; Rust `/` truncates.
             let q = x.wrapping_div(y);
             let r = x.wrapping_rem(y);
-            let floored = if r != 0 && (r < 0) != (y < 0) { q - 1 } else { q };
+            let floored = if r != 0 && (r < 0) != (y < 0) {
+                q - 1
+            } else {
+                q
+            };
             cells[op.dst as usize] = floored as u8;
         }
-        CmpEq => {
-            cells[op.dst as usize] =
-                u8::from(rd(op.a)? == rd(op.b)?)
-        }
-        CmpNe => {
-            cells[op.dst as usize] =
-                u8::from(rd(op.a)? != rd(op.b)?)
-        }
-        CmpLt => {
-            cells[op.dst as usize] =
-                u8::from((rd(op.a)? as i8) < (rd(op.b)? as i8))
-        }
-        CmpLe => {
-            cells[op.dst as usize] =
-                u8::from((rd(op.a)? as i8) <= (rd(op.b)? as i8))
-        }
-        CmpGt => {
-            cells[op.dst as usize] =
-                u8::from((rd(op.a)? as i8) > (rd(op.b)? as i8))
-        }
-        CmpGe => {
-            cells[op.dst as usize] =
-                u8::from((rd(op.a)? as i8) >= (rd(op.b)? as i8))
-        }
+        CmpEq => cells[op.dst as usize] = u8::from(rd(op.a)? == rd(op.b)?),
+        CmpNe => cells[op.dst as usize] = u8::from(rd(op.a)? != rd(op.b)?),
+        CmpLt => cells[op.dst as usize] = u8::from((rd(op.a)? as i8) < (rd(op.b)? as i8)),
+        CmpLe => cells[op.dst as usize] = u8::from((rd(op.a)? as i8) <= (rd(op.b)? as i8)),
+        CmpGt => cells[op.dst as usize] = u8::from((rd(op.a)? as i8) > (rd(op.b)? as i8)),
+        CmpGe => cells[op.dst as usize] = u8::from((rd(op.a)? as i8) >= (rd(op.b)? as i8)),
         Select => {
             let cond = rd(op.a)?;
             let x = rd(op.b)?;
@@ -198,7 +169,10 @@ mod tests {
     #[test]
     fn wrapping_semantics() {
         // 200 + 100 wraps to 44; 0 - 1 wraps to 255
-        let out = run("5\nset 1,200\nset 2,100\nadd 3,1,2\nsub 4,1,2\n3,4\n", &[0u8; 1]);
+        let out = run(
+            "5\nset 1,200\nset 2,100\nadd 3,1,2\nsub 4,1,2\n3,4\n",
+            &[0u8; 1],
+        );
         assert_eq!(out, vec![44, 100]);
     }
 
@@ -235,10 +209,7 @@ mod tests {
 
     #[test]
     fn not_abs() {
-        let out = run(
-            "1\nset 1,0\nnot 2,1\nset 3,128\nabs 4,3\n2,4\n",
-            &[0u8; 1],
-        );
+        let out = run("1\nset 1,0\nnot 2,1\nset 3,128\nabs 4,3\n2,4\n", &[0u8; 1]);
         // !0 = 255; abs(-128) wraps to 128
         assert_eq!(out, vec![255, 128]);
     }
