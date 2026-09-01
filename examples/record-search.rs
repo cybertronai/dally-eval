@@ -44,7 +44,9 @@ fn synth_extra(inputs: &[u8], n: usize, width: usize, seed: u64) -> Vec<u8> {
     let keep = (32 * width).min(v.len());
     v[..keep].copy_from_slice(&inputs[..keep]);
     for b in v[keep..].iter_mut() {
-        s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        s = s
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         *b = (s >> 33) as u8;
     }
     v
@@ -97,7 +99,11 @@ for c, seed, cap, rec in best[:16]:
         .env("PYTHONPATH", "/nonexistent") // ensure no accidental env
         .output()
         .expect("python generation");
-    assert!(out.status.success(), "python failed: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "python failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let ranking: Vec<(u32, u32, u64, f64)> = String::from_utf8_lossy(&out.stdout)
         .lines()
         .filter_map(|l| {
@@ -128,9 +134,16 @@ for c, seed, cap, rec in best[:16]:
             Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).into_owned(),
             _ => continue,
         };
-        let Ok(prog) = Program::parse(&text) else { continue };
-        debug_assert_eq!(prog.static_cost, cost, "cost mismatch for seed={seed} cap={cap}");
-        let Some(outs) = CpuRunner.run_batch(&prog, &probe, probe_n).ok() else { continue };
+        let Ok(prog) = Program::parse(&text) else {
+            continue;
+        };
+        debug_assert_eq!(
+            prog.static_cost, cost,
+            "cost mismatch for seed={seed} cap={cap}"
+        );
+        let Some(outs) = CpuRunner.run_batch(&prog, &probe, probe_n).ok() else {
+            continue;
+        };
         let ok = outs
             .iter()
             .zip(expected32.chunks(32).cycle())

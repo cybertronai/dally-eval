@@ -36,7 +36,9 @@ fn main() {
 fn cmd_verify(_args: &[String]) {
     use std::io::Read;
     let mut text = String::new();
-    std::io::stdin().read_to_string(&mut text).unwrap_or_else(|e| die(e));
+    std::io::stdin()
+        .read_to_string(&mut text)
+        .unwrap_or_else(|e| die(e));
     let prog = Program::parse(&text).unwrap_or_else(|e| die(e));
     println!(
         "{{\"cost\":{},\"ops\":{},\"inputs\":{},\"outputs\":{}}}",
