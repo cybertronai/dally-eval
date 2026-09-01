@@ -21,7 +21,7 @@ const fn isqrt(n: u64) -> u64 {
     // Integer Newton from a power-of-two seed (bit length halved):
     // fully const-evaluable, no float ops.
     let bits = 64 - n.leading_zeros();
-    let mut x = 1u64 << ((bits + 1) / 2);
+    let mut x = 1u64 << bits.div_ceil(2);
     loop {
         let y = (x + n / x) / 2;
         if y >= x {

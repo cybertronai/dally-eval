@@ -51,13 +51,12 @@ cargo bench
 ```
 
 The devShell pins Rust via oxalica/rust-overlay from
-`rust-toolchain.toml` (1.85.0) and wires headless GPU access (RADV
+`rust-toolchain.toml` (stable channel) and wires headless GPU access (RADV
 ICD, Vulkan loader, libudev).
 
 macOS (Apple Silicon: wgpu uses the Metal backend out of the box):
 ```
-rustup toolchain install 1.85.0
-rustup default 1.85.0   # or trust rust-toolchain.toml
+rustup default stable
 cargo test
 cargo bench
 ```
