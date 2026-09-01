@@ -6,8 +6,8 @@
 //! per-instance trap flag instead of unwinding; the host maps trapped
 //! instances back to [`RunError::DivideByZero`].
 //!
-//! On this host GPU work must run inside `training.slice` per the
-//! workspace GPU-compute policy (see README).
+//! Batch sizes above a few thousand instances allocate GPU memory; run
+//! large batches within your host's resource-management policy.
 
 use crate::eval::RunError;
 use crate::ir::{OpKind, Program};

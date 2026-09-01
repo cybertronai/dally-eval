@@ -51,8 +51,8 @@ cargo bench
 ```
 
 The devShell pins Rust via oxalica/rust-overlay from
-`rust-toolchain.toml` (stable channel) and wires headless GPU access (RADV
-ICD, Vulkan loader, libudev).
+`rust-toolchain.toml` (stable channel) and wires headless GPU access
+(Vulkan loader and ICD discovery).
 
 macOS (Apple Silicon: wgpu uses the Metal backend out of the box):
 ```
@@ -64,12 +64,7 @@ GPU tests pick up Metal automatically and soft-skip only if no adapter
 is found.
 
 Non-Nix Linux: same rustup path; the GPU backend needs a Vulkan driver
-(RADV/AMD, ANV/Intel, or NVIDIA proprietary). On NixOS hosts, run GPU work under the workspace policy slice:
-```
-systemd-run --user --slice=training.slice --wait --pipe \
-  bash -c 'cd dally-eval && nix develop --command cargo test --test wgpu_parity'
-```
-
+(RADV/AMD, ANV/Intel, or NVIDIA proprietary). 
 ## CLI
 
 ```
@@ -132,10 +127,7 @@ Python-parity contract). The golden fixtures are generated from
 cybertronai/sutro-problems (sparse-parity tier, exported 2026-09-01);
 `tests/golden.rs` pins their exact cost and outputs - any semantics
 change that breaks them is wrong unless the reference evaluator changed
-first. GPU work on the NixOS host runs under `training.slice` per the
-workspace GPU-compute policy; the command is in the wgpu_parity test
-header.
-
+first. 
 ## Fixture provenance
 
 `tests/fixtures/siswalk1_cap2.ir` is the sparse-parity benchmark's
