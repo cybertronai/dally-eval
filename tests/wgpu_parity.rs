@@ -27,7 +27,8 @@ fn cubecl_matches_cpu_bit_exact() {
     let n = u32::from_le_bytes(bin[off..off + 4].try_into().unwrap()) as usize;
     off += 4;
     let width = u32::from_le_bytes(bin[off..off + 4].try_into().unwrap()) as usize;
-    off += 8;
+    off += 4; // past width
+    off += 8; // past u64 reference cost
     let inputs = bin[off..off + n * width].to_vec();
 
     let cpu = CpuRunner.run_batch(&prog, &inputs, n).unwrap();
@@ -51,4 +52,41 @@ fn cubecl_matches_cpu_bit_exact() {
     for (i, (c, g)) in cpu.iter().zip(gpu.iter()).enumerate() {
         assert_eq!(c, g, "instance {i} differs between CPU and CubeCL");
     }
+}
+
+#[test]
+fn cubecl_scored_mode_counts_correct() {
+    let text = fs::read_to_string(fixture("siswalk1_cap2.ir")).unwrap();
+    let prog = Program::parse(&text).unwrap();
+    let bin = fs::read(fixture("parity32.bin")).unwrap();
+    let mut off = 0usize;
+    let n = u32::from_le_bytes(bin[off..off + 4].try_into().unwrap()) as usize;
+    off += 4;
+    let width = u32::from_le_bytes(bin[off..off + 4].try_into().unwrap()) as usize;
+    off += 4; // past width
+    off += 8; // past u64 reference cost
+    let inputs = bin[off..off + n * width].to_vec();
+    off += n * width;
+    let out_words = u32::from_le_bytes(bin[off..off + 4].try_into().unwrap()) as usize;
+    off += 4;
+    let expected = bin[off..off + out_words].to_vec();
+
+    let runner = match CubeRunner::new(&prog, n) {
+        Ok(r) => r,
+        Err(dally_eval::RunError::GpuUnavailable(msg)) => {
+            eprintln!("SKIP: no GPU available: {msg}");
+            return;
+        }
+        Err(e) => panic!("{e:?}"),
+    };
+    let correct = match runner.run_scored(&prog, &inputs, &expected, n) {
+        Ok(c) => c,
+        Err((_, dally_eval::RunError::GpuUnavailable(msg))) => {
+            eprintln!("SKIP: {msg}");
+            return;
+        }
+        Err((i, e)) => panic!("instance {i}: {e:?}"),
+    };
+    // the golden fixture is the all-solved slice: every instance passes
+    assert_eq!(correct, n);
 }

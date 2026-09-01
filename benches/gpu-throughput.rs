@@ -20,7 +20,7 @@ fn main() {
     let width = prog.inputs.len();
 
     // probe: build the runner (compiles the kernel) on a 1-instance batch
-    let runner = match CubeRunner::new(&prog, 50_000) {
+    let runner = match CubeRunner::new(&prog, 100_000) {
         Ok(r) => r,
         Err(RunError::GpuUnavailable(m)) => {
             eprintln!("SKIP: no GPU adapter ({m})");
@@ -37,7 +37,7 @@ fn main() {
         Err((i, e)) => panic!("probe instance {i}: {e:?}"),
     }
 
-    for &n in &[1_000usize, 10_000, 50_000] {
+    for &n in &[1_000usize, 10_000, 50_000, 100_000] {
         let mut seed = 0x2545_F491_4F6C_DD1Du64;
         let mut inputs = vec![0u8; n * width];
         for b in inputs.iter_mut() {
@@ -68,9 +68,24 @@ fn main() {
         }
         let per = t0.elapsed() / iters;
         println!(
-            "batch {n:>6}: {per:>10.3?}/batch   {:>10.0} instances/s   (ops {})",
+            "raw    {n:>6}: {per:>10.3?}/batch   {:>10.0} instances/s   (ops {})",
             n as f64 / per.as_secs_f64(),
             prog.len()
+        );
+
+        // scored mode: answer key uploaded per call, grading on device,
+        // one flag word per instance comes back
+        let expected_flat: Vec<u8> = gpu.iter().flat_map(|r| r.iter().copied()).collect();
+        let t0 = Instant::now();
+        for _ in 0..iters {
+            let _ = runner
+                .run_scored(&prog, &inputs, &expected_flat, n)
+                .unwrap();
+        }
+        let per = t0.elapsed() / iters;
+        println!(
+            "scored {n:>6}: {per:>10.3?}/batch   {:>10.0} instances/s",
+            n as f64 / per.as_secs_f64()
         );
     }
 }

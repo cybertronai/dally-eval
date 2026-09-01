@@ -84,11 +84,14 @@ fn dally_kernel(
     cells: &mut Array<u32>,
     outputs: &mut Array<u32>,
     traps: &mut Array<u32>,
+    expected: &Array<u32>,
+    flags: &mut Array<u32>,
     n_instances: usize,
     n_ops: usize,
     n_in: usize,
     n_out: usize,
     cell_words: usize,
+    mode: u32,
 ) {
     let inst = ABSOLUTE_POS;
     if inst >= n_instances {
@@ -252,12 +255,30 @@ fn dally_kernel(
     }
 
     traps[inst] = trap;
-    for j in range(0usize, n_out) {
-        let flat = inst * n_out + j;
-        let wi = flat / 4usize;
-        let wsh = ((flat % 4usize) * 8usize) as u32;
-        let v = cell_get(cells, base, out_addrs[j]);
-        outputs[wi] |= v << wsh;
+    if mode == 0u32 {
+        for j in range(0usize, n_out) {
+            let flat = inst * n_out + j;
+            let wi = flat / 4usize;
+            let wsh = ((flat % 4usize) * 8usize) as u32;
+            let v = cell_get(cells, base, out_addrs[j]);
+            outputs[wi] |= v << wsh;
+        }
+    } else {
+        // on-device scoring: grade against the answer key that was
+        // uploaded once; ship back one right/wrong bit per instance
+        let mut ok = 1u32;
+        if trap != 0u32 {
+            ok = 0u32;
+        }
+        for j in range(0usize, n_out) {
+            let flat = inst * n_out + j;
+            let eb = (expected[flat / 4usize] >> (((flat % 4usize) * 8usize) as u32)) & 0xFFu32;
+            let v = cell_get(cells, base, out_addrs[j]);
+            if v != eb {
+                ok = 0u32;
+            }
+        }
+        flags[inst] = ok;
     }
 }
 
@@ -329,6 +350,7 @@ pub struct CubeRunner {
     capacity: usize,
     cells: Handle,
     traps: Handle,
+    flags: Handle,
 }
 
 impl CubeRunner {
@@ -357,6 +379,7 @@ impl CubeRunner {
         let cell_words = (prog.max_addr as usize + 1).div_ceil(4);
         let cells = client.empty(capacity * cell_words * 4);
         let traps = client.empty(capacity * 4);
+        let flags = client.empty(capacity * 4);
         Ok(Self {
             client,
             ops,
@@ -369,12 +392,12 @@ impl CubeRunner {
             capacity,
             cells,
             traps,
+            flags,
         })
     }
 
-    /// Grow-only outputs reset is handled by the kernel (`|=` into a
-    /// zeroed word requires the buffer to start zeroed): allocate the
-    /// outputs buffer zeroed via create_from_slice of zeros.
+    /// Raw output mode: byte matrix of n x n_out. Uses one combined
+    /// read sync for outputs and traps.
     pub fn run(
         &self,
         prog: &Program,
@@ -383,6 +406,65 @@ impl CubeRunner {
     ) -> Result<Vec<Vec<u8>>, (usize, RunError)> {
         let width = prog.inputs.len();
         debug_assert_eq!(instances.len(), n * width);
+        self.check_capacity(n)?;
+        let inputs = self
+            .client
+            .create_from_slice(bytemuck::cast_slice(&pack_bytes(instances)));
+        let out_words = n * prog.outputs.len().div_ceil(4);
+        let outputs = self.client.create_from_slice(&vec![0u8; out_words * 4]);
+        self.launch(prog, &inputs, &outputs, n, 0u32);
+        let both = self.client.read(vec![outputs, self.traps.clone()]);
+        let out_bytes = both[0].clone();
+        let trap_bytes = both[1].clone();
+        self.collect_raw(prog, &out_bytes, &trap_bytes, n)
+    }
+
+    /// Scored mode (leaderboard path): the answer key uploads once per
+    /// call and grading happens on device; only one flag word per
+    /// instance comes back. Returns the number of fully-correct
+    /// instances.
+    pub fn run_scored(
+        &self,
+        prog: &Program,
+        instances: &[u8],
+        expected_flat: &[u8],
+        n: usize,
+    ) -> Result<usize, (usize, RunError)> {
+        let width = prog.inputs.len();
+        let out_w = prog.outputs.len();
+        debug_assert_eq!(instances.len(), n * width);
+        debug_assert_eq!(expected_flat.len(), n * out_w);
+        self.check_capacity(n)?;
+        let inputs = self
+            .client
+            .create_from_slice(bytemuck::cast_slice(&pack_bytes(instances)));
+        let expected = self
+            .client
+            .create_from_slice(bytemuck::cast_slice(&pack_bytes(expected_flat)));
+        // the kernel writes pass/fail into the persistent flags handle
+        self.launch(prog, &inputs, &expected, n, 1u32);
+        let both = self
+            .client
+            .read(vec![self.flags.clone(), self.traps.clone()]);
+        let flag_bytes = both[0].clone();
+        let trap_bytes = both[1].clone();
+        let flags: Vec<u32> = bytemuck::cast_slice(&flag_bytes).to_vec();
+        let mut traps: Vec<u32> = bytemuck::cast_slice(&trap_bytes).to_vec();
+        traps.truncate(n);
+        for (i, trap) in traps.iter().enumerate() {
+            if *trap != 0 {
+                return Err((
+                    i,
+                    RunError::DivideByZero {
+                        op_index: usize::MAX,
+                    },
+                ));
+            }
+        }
+        Ok(flags.iter().take(n).filter(|&&f| f == 1).count())
+    }
+
+    fn check_capacity(&self, n: usize) -> Result<(), (usize, RunError)> {
         if n > self.capacity {
             return Err((
                 0,
@@ -392,12 +474,21 @@ impl CubeRunner {
                 )),
             ));
         }
-        let inputs = self
-            .client
-            .create_from_slice(bytemuck::cast_slice(&pack_bytes(instances)));
-        // outputs accumulate with |=, so hand the kernel a zeroed view
-        let out_words = (n * prog.outputs.len()).div_ceil(4);
-        let outputs = self.client.create_from_slice(&vec![0u8; out_words * 4]);
+        Ok(())
+    }
+
+    fn launch(
+        &self,
+        prog: &Program,
+        inputs: &Handle,
+        outputs_or_expected: &Handle,
+        n: usize,
+        mode: u32,
+    ) {
+        let width = prog.inputs.len();
+        // the same buffer serves as outputs (mode 0) or the answer key
+        // (mode 1); both are n x n_out bytes packed 4/word
+        let out_words = n * prog.outputs.len().div_ceil(4);
         let groups = n.div_ceil(64) as u32;
         unsafe {
             dally_kernel::launch_unchecked::<cubecl_wgpu::WgpuRuntime>(
@@ -407,26 +498,33 @@ impl CubeRunner {
                 ArrayArg::from_raw_parts(self.ops.clone(), self.n_ops * 4),
                 ArrayArg::from_raw_parts(self.in_addrs.clone(), self.n_in),
                 ArrayArg::from_raw_parts(self.out_addrs.clone(), self.n_out),
-                ArrayArg::from_raw_parts(inputs, n * width.div_ceil(4)),
+                ArrayArg::from_raw_parts(inputs.clone(), n * width.div_ceil(4)),
                 ArrayArg::from_raw_parts(self.cells.clone(), self.capacity * self.cell_words),
-                ArrayArg::from_raw_parts(outputs.clone(), out_words),
+                ArrayArg::from_raw_parts(outputs_or_expected.clone(), out_words),
                 ArrayArg::from_raw_parts(self.traps.clone(), self.capacity),
+                ArrayArg::from_raw_parts(outputs_or_expected.clone(), out_words),
+                ArrayArg::from_raw_parts(self.flags.clone(), self.capacity),
                 n,
                 self.n_ops,
                 self.n_in,
                 self.n_out,
                 self.cell_words,
+                mode,
             );
         }
-        let out_bytes = self.client.read_one_unchecked(outputs);
-        let trap_bytes = self.client.read_one_unchecked(self.traps.clone());
-        let mut traps: Vec<u32> = bytemuck::cast_slice(&trap_bytes).to_vec();
+    }
+
+    fn collect_raw(
+        &self,
+        prog: &Program,
+        out_bytes: &[u8],
+        trap_bytes: &[u8],
+        n: usize,
+    ) -> Result<Vec<Vec<u8>>, (usize, RunError)> {
+        let mut traps: Vec<u32> = bytemuck::cast_slice(trap_bytes).to_vec();
         traps.truncate(n);
-        let flat = unpack_bytes(bytemuck::cast_slice(&out_bytes), n * prog.outputs.len());
-        let mut rows = Vec::with_capacity(n);
         for (i, trap) in traps.iter().enumerate() {
             if *trap != 0 {
-                // op index is not tracked on the GPU side
                 return Err((
                     i,
                     RunError::DivideByZero {
@@ -434,6 +532,10 @@ impl CubeRunner {
                     },
                 ));
             }
+        }
+        let flat = unpack_bytes(bytemuck::cast_slice(out_bytes), n * prog.outputs.len());
+        let mut rows = Vec::with_capacity(n);
+        for i in 0..n {
             rows.push(flat[i * prog.outputs.len()..(i + 1) * prog.outputs.len()].to_vec());
         }
         Ok(rows)

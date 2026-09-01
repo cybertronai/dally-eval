@@ -96,16 +96,23 @@ bit-exact vs CPU on every batch):
 
 | batch | per batch | instances/s |
 | - | - | - |
-| 1,000 | 29.8 ms | 33,506 |
-| 10,000 | 119.8 ms | 83,478 |
-| 50,000 | 777.6 ms | 64,297 |
+| 1,000 | 29.6 ms | 33,772 |
+| 10,000 | 117.7 ms | 84,954 |
+| 50,000 | 788.1 ms | 63,443 |
+| 100,000 | 1.596 s | 62,674 |
 
-Honest reading: the GPU path no longer rebuilds its kernel or op
-buffers per call (the CubeCL port removed that overhead; 1k batches
-improved from 21.7k to 33.5k inst/s), but readback still dominates and
-the 16-thread CPU runner remains ahead at these batch sizes (208k
-inst/s). The kernel itself is now portable Rust - the same source
-targets WGSL, SPIR-V, MSL, and CUDA via CubeCL's runtime compilation.
+Scored mode (grading on device, one flag word per instance instead of
+the full output matrix) measures within noise of raw mode at every
+batch size - readback is *not* the bottleneck. The kernel is
+global-memory-latency bound: every IR instruction does dependent,
+dynamically-addressed cell reads from device memory, and a 73k-deep
+dependent load chain per instance limits per-thread progress. The
+known next lever is keeping hot cells in faster memory (shared memory
+at reduced workgroup width, or register-resident hot cells), which is
+a kernel redesign; the 16-thread CPU runner (208k inst/s) remains
+ahead at these batch sizes. The kernel itself is portable Rust - the
+same source targets WGSL, SPIR-V, MSL, and CUDA via CubeCL's runtime
+compilation.
 
 ## Parallelism shape
 
