@@ -33,9 +33,10 @@ two's-complement byte.
   and the `Checker` trait for reference-function validation
 - `src/runner.rs` - `BatchRunner` trait; `CpuRunner` fans instances out
   across Rayon workers with one machine per worker
-- `src/wgpu_runner.rs` - `WgpuRunner`: the same batch contract on a
-  WGSL compute shader, one workgroup lane per instance, div-by-zero as
-  a per-instance trap flag
+- `src/cube_runner.rs` - `CubeRunner`: the same batch contract on a
+  CubeCL `#[cube]` kernel written in pure Rust (no shader text), one
+  workgroup lane per instance, div-by-zero as a per-instance trap
+  flag, with the op stream and address tables resident across batches
 - `tests/` - golden parity (real 73,293-op benchmark program, 32 real
   instances, byte-exact expected outputs), task families (4x4 matmul,
   5-input polynomial, 16/32-bit sparse parity trees), GPU-vs-CPU parity
@@ -87,22 +88,24 @@ Python reference: ~2.8 s per 1,024 instances of the 73k-op program.
 That is ~570x the Python engine on the same workload shape, with
 byte-identical outputs.
 
-GPU (WgpuRunner, end-to-end per call: upload + kernel + readback;
-AMD RX 6900 XT / RADV, same 73,293-op program, bit-exact vs CPU on
-every batch):
+GPU (CubeRunner: CubeCL `#[cube]` kernel in pure Rust, compiled to the
+active backend at runtime; static buffer reuse - op stream and address
+tables stay resident, per batch only the instance matrix uploads and
+outputs/traps read back. AMD RX 6900 XT / RADV, same 73,293-op program,
+bit-exact vs CPU on every batch):
 
 | batch | per batch | instances/s |
 | - | - | - |
-| 1,000 | 46.1 ms | 21,691 |
-| 10,000 | 130.0 ms | 76,919 |
-| 50,000 | 810.1 ms | 61,719 |
+| 1,000 | 29.8 ms | 33,506 |
+| 10,000 | 119.8 ms | 83,478 |
+| 50,000 | 777.6 ms | 64,297 |
 
-Honest reading: the current GPU path rebuilds its pipeline and buffers
-on every call, so at these batch sizes the 16-thread CPU runner wins
-(208k inst/s). The GPU backend's value today is correctness (bit-exact
-semantics on a second vendor stack) and its headroom: caching the
-pipeline/buffers per program and raising batch sizes past ~100k
-instances is the known path to making it the throughput leader.
+Honest reading: the GPU path no longer rebuilds its kernel or op
+buffers per call (the CubeCL port removed that overhead; 1k batches
+improved from 21.7k to 33.5k inst/s), but readback still dominates and
+the 16-thread CPU runner remains ahead at these batch sizes (208k
+inst/s). The kernel itself is now portable Rust - the same source
+targets WGSL, SPIR-V, MSL, and CUDA via CubeCL's runtime compilation.
 
 ## Parallelism shape
 

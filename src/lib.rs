@@ -22,12 +22,12 @@
 //! runner and a future wgpu compute backend share one interface.
 
 pub mod cost;
+pub mod cube_runner;
 pub mod eval;
 pub mod ir;
 pub mod runner;
-pub mod wgpu_runner;
 
+pub use cube_runner::CubeRunner;
 pub use eval::{Checker, Machine, RunError};
 pub use ir::{Op, OpKind, Program};
 pub use runner::{BatchRunner, CpuRunner};
-pub use wgpu_runner::WgpuRunner;
