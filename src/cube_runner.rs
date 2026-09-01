@@ -333,8 +333,20 @@ pub struct CubeRunner {
 
 impl CubeRunner {
     pub fn new(prog: &Program, capacity: usize) -> Result<Self, RunError> {
-        let device = cubecl_wgpu::WgpuDevice::default();
-        let client = <cubecl_wgpu::WgpuRuntime as cubecl::Runtime>::client(&device);
+        // cubecl panics (rather than errors) when no adapter exists;
+        // catch it so headless environments soft-skip instead of abort.
+        let init = std::panic::catch_unwind(|| {
+            let device = cubecl_wgpu::WgpuDevice::default();
+            <cubecl_wgpu::WgpuRuntime as cubecl::Runtime>::client(&device)
+        })
+        .map_err(|e| {
+            RunError::GpuUnavailable(
+                e.downcast_ref::<String>()
+                    .cloned()
+                    .unwrap_or_else(|| "cubecl init panicked (no adapter?)".into()),
+            )
+        })?;
+        let client = init;
         let ops = client.create_from_slice(bytemuck::cast_slice(&pack_ops(prog)));
         let in_addrs = client.create_from_slice(bytemuck::cast_slice(
             &prog.inputs.iter().map(|&x| x as u32).collect::<Vec<_>>(),
