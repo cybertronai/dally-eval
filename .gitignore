@@ -2,3 +2,4 @@
 Cargo.lock.orig
 result
 .direnv
+.bench
