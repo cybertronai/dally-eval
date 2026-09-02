@@ -1,0 +1,9 @@
+[package]
+name = "s1-dally"
+version = "0.1.0"
+edition = "2021"
+description = "System-1 MCTS integration interface for dally-eval schedule search"
+license = "MIT"
+
+[dependencies]
+dally-eval = { path = ".." }

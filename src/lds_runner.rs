@@ -228,6 +228,29 @@ fn dally_lds_kernel(
     }
 }
 
+/// Per-binding storage ceiling guard (wgpu maxStorageBufferBindingSize
+/// is commonly 128 MiB; stay well under, honoring the workspace VRAM
+/// pre-calculation invariant).
+const MAX_CELLS_BUFFER: usize = 96 * 1024 * 1024;
+
+/// Largest batch whose flat cells buffer stays under the binding cap.
+fn chunk_capacity(cell_bytes_per_instance: usize, reserved: usize) -> usize {
+    let budget = MAX_CELLS_BUFFER.saturating_sub(reserved);
+    (budget / cell_bytes_per_instance.max(1)).max(1)
+}
+
+/// Cap per-dispatch work: very-long-op programs (hundreds of thousands
+/// of dependent ops per instance) hang the GPU when too many lanes are
+/// dispatched at once (device-lost on 709k ops x 34k lanes, observed
+/// on RDNA2). Coarse guard: chunk_lanes * n_ops <= WORK_CAP.
+const WORK_CAP: usize = 8_000_000_000;
+
+fn chunk_for(n_ops: usize, cell_bytes_per_instance: usize, reserved: usize) -> usize {
+    let by_bytes = chunk_capacity(cell_bytes_per_instance, reserved);
+    let by_work = (WORK_CAP / n_ops.max(1)).max(1);
+    by_bytes.min(by_work)
+}
+
 fn prev_pow2(n: usize) -> usize {
     if n == 0 {
         return 1;
@@ -370,8 +393,14 @@ impl LdsRunner {
         let out_addrs = client.create_from_slice(bytemuck::cast_slice(
             &prog.outputs.iter().map(|&x| x as u32).collect::<Vec<_>>(),
         ));
-        let traps = client.empty(capacity * 4);
-        let flags = client.empty(capacity * 4);
+        // persistent per-instance buffers are sized to the chunk
+        // capacity, not the requested capacity: each dispatch only
+        // touches m <= chunk instances, and capacity-sized buffers
+        // would blow the binding limit for 100k-instance runners on
+        // the big record programs
+        let chunk = chunk_for(prog.len(), tiling.cell_words * 4, 0).min(capacity);
+        let traps = client.create_from_slice(&vec![0u8; chunk * 4]);
+        let flags = client.create_from_slice(&vec![0u8; chunk * 4]);
         Ok(Self {
             client,
             tiling,
@@ -381,7 +410,7 @@ impl LdsRunner {
             n_ops: prog.len(),
             n_in: prog.inputs.len(),
             n_out: prog.outputs.len(),
-            capacity,
+            capacity: chunk,
             traps,
             flags,
         })
@@ -410,15 +439,9 @@ impl LdsRunner {
     }
 
     fn check_capacity(&self, n: usize) -> Result<(), (usize, RunError)> {
-        if n > self.capacity {
-            return Err((
-                0,
-                RunError::GpuUnavailable(format!(
-                    "batch {n} exceeds runner capacity {}",
-                    self.capacity
-                )),
-            ));
-        }
+        // chunked dispatch handles any n; persistent buffers are
+        // chunk-sized and re-used per sub-batch
+        let _ = n;
         Ok(())
     }
 
@@ -431,37 +454,54 @@ impl LdsRunner {
         let width = prog.inputs.len();
         debug_assert_eq!(instances.len(), n * width);
         self.check_capacity(n)?;
-        let inputs = self
-            .client
-            .create_from_slice(bytemuck::cast_slice(&pack_bytes(instances)));
-        let out_words = n * prog.outputs.len().div_ceil(4);
-        let outputs = self.client.create_from_slice(&vec![0u8; out_words * 4]);
-        // expected slot unused in raw mode; hand the outputs buffer
-        let groups = n.div_ceil(self.tiling.lanes) as u32;
-        unsafe {
-            dally_lds_kernel::launch_unchecked::<cubecl_wgpu::WgpuRuntime>(
-                &self.client,
-                CubeCount::Static(groups, 1, 1),
-                CubeDim::new_1d(self.tiling.lanes as u32),
-                ArrayArg::from_raw_parts(self.ops.clone(), self.n_ops * 4),
-                ArrayArg::from_raw_parts(self.in_addrs.clone(), self.n_in),
-                ArrayArg::from_raw_parts(self.out_addrs.clone(), self.n_out),
-                ArrayArg::from_raw_parts(inputs, n * width.div_ceil(4)),
-                ArrayArg::from_raw_parts(outputs.clone(), out_words),
-                ArrayArg::from_raw_parts(self.traps.clone(), self.capacity),
-                ArrayArg::from_raw_parts(outputs.clone(), out_words),
-                ArrayArg::from_raw_parts(self.flags.clone(), self.capacity),
-                n,
-                self.n_ops,
-                self.n_in,
-                self.n_out,
-                self.tiling.cell_words,
-                self.tiling.lanes,
-                0u32,
-            );
+        // chunked dispatch: each sub-batch's cells/outputs bindings
+        // stay under the storage cap, so 100k+ instance batches on the
+        // big record programs dispatch transparently (VRAM
+        // pre-calculation invariant)
+        let cell_bytes = self.tiling.cell_words * 4;
+        let chunk = chunk_for(self.n_ops, cell_bytes, 0).min(n);
+        let mut rows_all = Vec::with_capacity(n);
+        let mut start = 0usize;
+        while start < n {
+            let end = (start + chunk).min(n);
+            let m = end - start;
+            let sub_in = &instances[start * width..end * width];
+            let inputs = self
+                .client
+                .create_from_slice(bytemuck::cast_slice(&pack_bytes(sub_in)));
+            let out_words = m * prog.outputs.len().div_ceil(4);
+            let outputs = self.client.create_from_slice(&vec![0u8; out_words * 4]);
+            let groups = m.div_ceil(self.tiling.lanes) as u32;
+            unsafe {
+                dally_lds_kernel::launch_unchecked::<cubecl_wgpu::WgpuRuntime>(
+                    &self.client,
+                    CubeCount::Static(groups, 1, 1),
+                    CubeDim::new_1d(self.tiling.lanes as u32),
+                    ArrayArg::from_raw_parts(self.ops.clone(), self.n_ops * 4),
+                    ArrayArg::from_raw_parts(self.in_addrs.clone(), self.n_in),
+                    ArrayArg::from_raw_parts(self.out_addrs.clone(), self.n_out),
+                    ArrayArg::from_raw_parts(inputs, m * width.div_ceil(4)),
+                    ArrayArg::from_raw_parts(outputs.clone(), out_words),
+                    ArrayArg::from_raw_parts(self.traps.clone(), self.capacity),
+                    ArrayArg::from_raw_parts(outputs.clone(), out_words),
+                    ArrayArg::from_raw_parts(self.flags.clone(), self.capacity),
+                    m,
+                    self.n_ops,
+                    self.n_in,
+                    self.n_out,
+                    self.tiling.cell_words,
+                    self.tiling.lanes,
+                    0u32,
+                );
+            }
+            let both = self.client.read(vec![outputs, self.traps.clone()]);
+            match self.collect_raw(prog, &both[0], &both[1], m) {
+                Ok(mut r) => rows_all.append(&mut r),
+                Err((i, e)) => return Err((start + i, e)),
+            }
+            start = end;
         }
-        let both = self.client.read(vec![outputs, self.traps.clone()]);
-        self.collect_raw(prog, &both[0], &both[1], n)
+        Ok(rows_all)
     }
 
     /// Scored mode: grading on device against a pre-uploaded answer
@@ -478,53 +518,64 @@ impl LdsRunner {
         debug_assert_eq!(instances.len(), n * width);
         debug_assert_eq!(expected_flat.len(), n * out_w);
         self.check_capacity(n)?;
-        let inputs = self
-            .client
-            .create_from_slice(bytemuck::cast_slice(&pack_bytes(instances)));
-        let expected = self
-            .client
-            .create_from_slice(bytemuck::cast_slice(&pack_bytes(expected_flat)));
-        let groups = n.div_ceil(self.tiling.lanes) as u32;
-        unsafe {
-            dally_lds_kernel::launch_unchecked::<cubecl_wgpu::WgpuRuntime>(
-                &self.client,
-                CubeCount::Static(groups, 1, 1),
-                CubeDim::new_1d(self.tiling.lanes as u32),
-                ArrayArg::from_raw_parts(self.ops.clone(), self.n_ops * 4),
-                ArrayArg::from_raw_parts(self.in_addrs.clone(), self.n_in),
-                ArrayArg::from_raw_parts(self.out_addrs.clone(), self.n_out),
-                ArrayArg::from_raw_parts(inputs, n * width.div_ceil(4)),
-                // outputs slot unused in scored mode; hand the key
-                ArrayArg::from_raw_parts(expected.clone(), n * out_w.div_ceil(4)),
-                ArrayArg::from_raw_parts(self.traps.clone(), self.capacity),
-                ArrayArg::from_raw_parts(expected.clone(), n * out_w.div_ceil(4)),
-                ArrayArg::from_raw_parts(self.flags.clone(), self.capacity),
-                n,
-                self.n_ops,
-                self.n_in,
-                self.n_out,
-                self.tiling.cell_words,
-                self.tiling.lanes,
-                1u32,
-            );
-        }
-        let both = self
-            .client
-            .read(vec![self.flags.clone(), self.traps.clone()]);
-        let flags: Vec<u32> = bytemuck::cast_slice(&both[0]).to_vec();
-        let mut traps: Vec<u32> = bytemuck::cast_slice(&both[1]).to_vec();
-        traps.truncate(n);
-        for (i, trap) in traps.iter().enumerate() {
-            if *trap != 0 {
-                return Err((
-                    i,
-                    RunError::DivideByZero {
-                        op_index: usize::MAX,
-                    },
-                ));
+        let cell_bytes = self.tiling.cell_words * 4;
+        let chunk = chunk_for(self.n_ops, cell_bytes, 0).min(n);
+        let mut correct = 0usize;
+        let mut start = 0usize;
+        while start < n {
+            let end = (start + chunk).min(n);
+            let m = end - start;
+            let sub_in = &instances[start * width..end * width];
+            let sub_exp = &expected_flat[start * out_w..end * out_w];
+            let inputs = self
+                .client
+                .create_from_slice(bytemuck::cast_slice(&pack_bytes(sub_in)));
+            let expected = self
+                .client
+                .create_from_slice(bytemuck::cast_slice(&pack_bytes(sub_exp)));
+            let groups = m.div_ceil(self.tiling.lanes) as u32;
+            unsafe {
+                dally_lds_kernel::launch_unchecked::<cubecl_wgpu::WgpuRuntime>(
+                    &self.client,
+                    CubeCount::Static(groups, 1, 1),
+                    CubeDim::new_1d(self.tiling.lanes as u32),
+                    ArrayArg::from_raw_parts(self.ops.clone(), self.n_ops * 4),
+                    ArrayArg::from_raw_parts(self.in_addrs.clone(), self.n_in),
+                    ArrayArg::from_raw_parts(self.out_addrs.clone(), self.n_out),
+                    ArrayArg::from_raw_parts(inputs, m * width.div_ceil(4)),
+                    ArrayArg::from_raw_parts(expected.clone(), m * out_w.div_ceil(4)),
+                    ArrayArg::from_raw_parts(self.traps.clone(), self.capacity),
+                    ArrayArg::from_raw_parts(expected.clone(), m * out_w.div_ceil(4)),
+                    ArrayArg::from_raw_parts(self.flags.clone(), self.capacity),
+                    m,
+                    self.n_ops,
+                    self.n_in,
+                    self.n_out,
+                    self.tiling.cell_words,
+                    self.tiling.lanes,
+                    1u32,
+                );
             }
+            let both = self
+                .client
+                .read(vec![self.flags.clone(), self.traps.clone()]);
+            let flags: Vec<u32> = bytemuck::cast_slice(&both[0]).to_vec();
+            let mut traps: Vec<u32> = bytemuck::cast_slice(&both[1]).to_vec();
+            traps.truncate(m);
+            for (j, trap) in traps.iter().enumerate() {
+                if *trap != 0 {
+                    return Err((
+                        start + j,
+                        RunError::DivideByZero {
+                            op_index: usize::MAX,
+                        },
+                    ));
+                }
+            }
+            correct += flags.iter().take(m).filter(|&&f| f == 1).count();
+            start = end;
         }
-        Ok(flags.iter().take(n).filter(|&&f| f == 1).count())
+        Ok(correct)
     }
 
     fn collect_raw(
