@@ -3,3 +3,4 @@ Cargo.lock.orig
 result
 .direnv
 .bench
+s1-dally/target
